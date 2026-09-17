@@ -6,6 +6,7 @@ export type Provider = {
   apiKey: string;
   model: string;
   maxTokens: number;
+  temperature: number;
 };
 
 export type StreamChunk = { kind: "thinking" | "text"; text: string };
@@ -14,12 +15,15 @@ const DEFAULT_MAX_TOKENS = 32000;
 
 export function getProvider(): Provider {
   const configured = Number(process.env.AI_MAX_TOKENS);
+  const rawTemp = process.env.AI_TEMPERATURE;
+  const temperature = rawTemp === undefined || rawTemp === "" ? 0 : Number(rawTemp);
   return {
     api: (process.env.AI_API as ApiFormat) || "openai-completions",
     baseUrl: (process.env.AI_BASE_URL || "https://openagentic.id/api/v1").replace(/\/+$/, ""),
     apiKey: process.env.AI_API_KEY || "",
     model: process.env.AI_MODEL ?? "",
     maxTokens: Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MAX_TOKENS,
+    temperature: Number.isFinite(temperature) && temperature >= 0 ? temperature : 0,
   };
 }
 
@@ -121,6 +125,7 @@ export async function* streamCompletion(
   const body = {
     model: provider.model,
     max_tokens: provider.maxTokens,
+    temperature: provider.temperature,
     stream: true,
     messages: [{ role: "user", content: prompt }],
   };
