@@ -12,15 +12,16 @@ import {
   Download,
   FileText,
   Loader2,
-  Moon,
   ScanSearch,
   ShieldCheck,
   Square,
-  Sun,
   Trash2,
   Upload,
 } from "lucide-react";
 import { CATEGORY_LABEL, stripJsonBlock, type ScoreBreakdown, type Status } from "@/lib/score";
+import { readStoredCv, takePendingJd, writeStoredCv } from "@/lib/storage";
+import { Button, Field, cn } from "@/components/ui";
+import { SiteHeader } from "@/components/site-header";
 
 const ACCEPTED_FILES = ".pdf,.docx,.txt,.md";
 const THINKING_PREVIEW_CHARS = 4000;
@@ -48,10 +49,6 @@ const STATUS_DOT: Record<Status, string> = {
   MISSING: "bg-muted-foreground/40",
 };
 
-function cn(...classes: Array<string | false | null | undefined>) {
-  return classes.filter(Boolean).join(" ");
-}
-
 export default function Home() {
   const [cv, setCv] = useState("");
   const [jd, setJd] = useState("");
@@ -66,7 +63,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [hydrated, setHydrated] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
@@ -77,8 +74,17 @@ export default function Home() {
   const gotTextRef = useRef(false);
 
   useEffect(() => {
-    setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+    const stored = readStoredCv();
+    if (stored) setCv(stored);
+    const pendingJd = takePendingJd();
+    if (pendingJd) setJd(pendingJd);
+    setHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    writeStoredCv(cv);
+  }, [cv, hydrated]);
 
   useEffect(() => {
     if (!loading) {
@@ -88,15 +94,6 @@ export default function Home() {
     const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(timer);
   }, [loading]);
-
-  const toggleTheme = useCallback(() => {
-    const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    document.documentElement.classList.toggle("dark", next === "dark");
-    try {
-      localStorage.setItem("theme", next);
-    } catch {}
-  }, [theme]);
 
   const flush = useCallback((force = false) => {
     const now = performance.now();
@@ -278,31 +275,12 @@ export default function Home() {
 
   return (
     <div className="min-h-dvh bg-background">
-      <header className="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur-md">
-        <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <div className="grid size-7 place-items-center rounded-md border border-border bg-muted">
-              <ScanSearch className="size-3.5 text-muted-foreground" />
-            </div>
-            <span className="text-sm font-medium tracking-tight">Job Fit Analyzer</span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <span className="hidden items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground sm:inline-flex">
-              <ShieldCheck className="size-3" />
-              skor dihitung, bukan ditebak
-            </span>
-            <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Ganti tema">
-              {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
-            </Button>
-          </div>
-        </div>
-        {loading && (
-          <div className="absolute inset-x-0 bottom-0 h-px overflow-hidden">
-            <div className="progress-slide h-px w-1/4 bg-foreground/40" />
-          </div>
-        )}
-      </header>
+      <SiteHeader active="analyze" busy={loading}>
+        <span className="hidden items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground sm:inline-flex">
+          <ShieldCheck className="size-3" />
+          skor dihitung, bukan ditebak
+        </span>
+      </SiteHeader>
 
       <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
         <div className="mb-8">
@@ -599,107 +577,6 @@ function ScoreCard({ score, fromCache }: { score: ScoreBreakdown; fromCache: boo
           </table>
         </div>
       </details>
-    </div>
-  );
-}
-
-function Button({
-  variant = "default",
-  size = "default",
-  className,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "default" | "outline" | "ghost";
-  size?: "default" | "sm" | "icon";
-}) {
-  return (
-    <button
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors",
-        "focus-visible:ring-[3px] focus-visible:ring-ring/20 focus-visible:outline-none",
-        "disabled:pointer-events-none disabled:opacity-50",
-        variant === "default" && "bg-primary text-primary-foreground hover:bg-primary/90",
-        variant === "outline" && "border border-border bg-background hover:bg-muted",
-        variant === "ghost" && "hover:bg-muted",
-        size === "default" && "h-9 px-4",
-        size === "sm" && "h-8 gap-1.5 px-3 text-xs",
-        size === "icon" && "size-8",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-function Field({
-  label,
-  icon,
-  hint,
-  footer,
-  action,
-  onFileDrop,
-  children,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  hint?: string;
-  footer?: string;
-  action?: React.ReactNode;
-  onFileDrop?: (file: File) => void;
-  children: React.ReactNode;
-}) {
-  const [dragging, setDragging] = useState(false);
-
-  const dropProps = onFileDrop
-    ? {
-        onDragOver: (e: React.DragEvent) => {
-          e.preventDefault();
-          setDragging(true);
-        },
-        onDragLeave: () => setDragging(false),
-        onDrop: (e: React.DragEvent) => {
-          e.preventDefault();
-          setDragging(false);
-          const file = e.dataTransfer.files?.[0];
-          if (file) onFileDrop(file);
-        },
-      }
-    : {};
-
-  return (
-    <div {...dropProps} className="flex flex-col">
-      <div className="mb-2 flex h-7 items-center justify-between gap-2">
-        <label className="flex items-center gap-1.5 text-sm font-medium">
-          <span className="text-muted-foreground">{icon}</span>
-          {label}
-        </label>
-        <div className="flex items-center gap-2">
-          {hint && (
-            <span className="hidden font-mono text-[10px] text-muted-foreground sm:inline">
-              {hint}
-            </span>
-          )}
-          {action}
-        </div>
-      </div>
-
-      <div
-        className={cn(
-          "relative overflow-hidden rounded-md border bg-transparent transition-shadow",
-          dragging
-            ? "border-ring ring-[3px] ring-ring/20"
-            : "border-input focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20",
-        )}
-      >
-        {children}
-        {dragging && (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center bg-background/85 text-sm font-medium">
-            Lepaskan file untuk di-upload
-          </div>
-        )}
-      </div>
-
-      {footer && <p className="mt-1.5 text-xs text-muted-foreground">{footer}</p>}
     </div>
   );
 }
