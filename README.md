@@ -32,6 +32,19 @@ tune the wording without touching any code.
 The reasoning stream is surfaced in the UI: a collapsible "Proses berpikir model"
 panel shows the model's thinking live and auto-collapses once the answer starts.
 
+## Interface
+
+Neutral, shadcn-style design tokens defined as HSL CSS variables in
+`src/app/globals.css` (`--background`, `--foreground`, `--muted`, `--border`,
+`--input`, `--primary`, `--ring`). They are exposed to Tailwind through
+`@theme inline`, so components use `bg-background`, `text-muted-foreground`,
+`border-border`, and so on.
+
+Dark mode is the default and is applied by putting `.dark` on `<html>` (set
+before paint by a small inline script in `layout.tsx` to avoid a flash). The
+toggle in the header persists the choice in `localStorage`. Inter is loaded
+through `next/font`, icons come from `lucide-react`.
+
 ## CV upload
 
 The CV panel accepts **PDF**, **DOCX**, **TXT**, and **MD**, either via the upload

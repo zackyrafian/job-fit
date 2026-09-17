@@ -3,6 +3,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  Briefcase,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  Copy,
+  Download,
+  FileText,
+  Loader2,
+  Moon,
+  ScanSearch,
+  ShieldCheck,
+  Square,
+  Sun,
+  Trash2,
+  Upload,
+} from "lucide-react";
 
 const ACCEPTED_FILES = ".pdf,.docx,.txt,.md";
 const THINKING_PREVIEW_CHARS = 4000;
@@ -12,8 +29,26 @@ type Mode = "fast" | "detailed";
 
 const MODE_INFO: Record<Mode, { label: string; hint: string }> = {
   fast: { label: "Cepat", hint: "prompt ringkas · ±15 detik" },
-  detailed: { label: "Detail", hint: "prompt lengkap · ±50 detik" },
+  detailed: { label: "Detail", hint: "prompt lengkap · ±45 detik" },
 };
+
+const SAMPLE_CV = `Zacky Rafian — Backend Developer
+
+Membangun REST API menggunakan Go dan Gin untuk aplikasi POS.
+Database PostgreSQL, deployment pakai Docker ke VPS.
+Internship backend Node.js selama 3 bulan.
+Frontend React.js untuk dashboard internal.`;
+
+const SAMPLE_JD = `Backend Engineer
+
+Required: 2+ tahun pengalaman profesional Node.js, desain RESTful API,
+PostgreSQL, Docker.
+Preferred: AWS, Kubernetes, React.js.
+Education: S1 Ilmu Komputer.`;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
 
 export default function Home() {
   const [cv, setCv] = useState("");
@@ -22,12 +57,13 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("fast");
   const [output, setOutput] = useState("");
   const [thinking, setThinking] = useState("");
-  const [thinkingOpen, setThinkingOpen] = useState(true);
+  const [thinkingOpen, setThinkingOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   const abortRef = useRef<AbortController | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
@@ -38,6 +74,10 @@ export default function Home() {
   const gotTextRef = useRef(false);
 
   useEffect(() => {
+    setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+  }, []);
+
+  useEffect(() => {
     if (!loading) {
       setElapsed(0);
       return;
@@ -45,6 +85,15 @@ export default function Home() {
     const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(timer);
   }, [loading]);
+
+  const toggleTheme = useCallback(() => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    document.documentElement.classList.toggle("dark", next === "dark");
+    try {
+      localStorage.setItem("theme", next);
+    } catch {}
+  }, [theme]);
 
   const flush = useCallback((force = false) => {
     const now = performance.now();
@@ -165,7 +214,7 @@ export default function Home() {
     if (!output) return;
     await navigator.clipboard.writeText(output);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
+    setTimeout(() => setCopied(false), 1800);
   }, [output]);
 
   const download = useCallback(() => {
@@ -189,220 +238,328 @@ export default function Home() {
     setError("");
   }, [stop]);
 
-  const thinkingPreview = thinking.length > THINKING_PREVIEW_CHARS
-    ? "…" + thinking.slice(-THINKING_PREVIEW_CHARS)
-    : thinking;
+  const loadSample = useCallback(() => {
+    setCv(SAMPLE_CV);
+    setJd(SAMPLE_JD);
+    setCvFile("");
+    setError("");
+  }, []);
+
+  const thinkingPreview =
+    thinking.length > THINKING_PREVIEW_CHARS
+      ? "…" + thinking.slice(-THINKING_PREVIEW_CHARS)
+      : thinking;
+
+  const status = error
+    ? "Error"
+    : loading && !output
+      ? "Berpikir"
+      : loading
+        ? "Menulis"
+        : output
+          ? "Selesai"
+          : null;
 
   return (
-    <main className="mx-auto w-full max-w-[1400px] px-5 py-8 lg:px-8">
-      <header className="mb-7">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-            Job Fit Analyzer
-          </h1>
-          <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-[11px] font-medium tracking-wide text-blue-300">
-            no fabrication
-          </span>
+    <div className="min-h-dvh bg-background">
+      <header className="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur-md">
+        <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between px-4 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            <div className="grid size-7 place-items-center rounded-md border border-border bg-muted">
+              <ScanSearch className="size-3.5 text-muted-foreground" />
+            </div>
+            <span className="text-sm font-medium tracking-tight">Job Fit Analyzer</span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="hidden items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground sm:inline-flex">
+              <ShieldCheck className="size-3" />
+              no fabrication
+            </span>
+            <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Ganti tema">
+              {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            </Button>
+          </div>
         </div>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">
-          Upload CV (PDF/DOCX) atau tempel manual, isi Job Description, lalu analisis seberapa
-          cocok keduanya. Skor dihitung berbobot dan setiap match wajib punya bukti dari CV.
-        </p>
+        {loading && (
+          <div className="absolute inset-x-0 bottom-0 h-px overflow-hidden">
+            <div className="progress-slide h-px w-1/4 bg-foreground/40" />
+          </div>
+        )}
       </header>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Panel
-          label="Candidate CV"
-          hint={cvFile ? `${cvFile} · ${cv.length.toLocaleString("id-ID")} chars` : `${cv.length.toLocaleString("id-ID")} chars`}
-          accent="text-emerald-300"
-          onFileDrop={uploadCv}
-          action={
-            <>
-              <input
-                ref={fileRef}
-                type="file"
-                accept={ACCEPTED_FILES}
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) uploadCv(file);
-                  e.target.value = "";
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={uploading}
-                className="rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-slate-200 transition hover:border-slate-600 hover:text-white disabled:opacity-50"
-              >
-                {uploading ? "Membaca…" : "Upload PDF/DOCX"}
-              </button>
-            </>
-          }
-        >
-          <textarea
-            value={cv}
-            onChange={(e) => setCv(e.target.value)}
-            spellCheck={false}
-            placeholder="Upload file PDF/DOCX, drag & drop ke sini, atau tempel isi CV…"
-            className="h-[340px] w-full resize-y bg-transparent p-4 font-mono text-[13px] leading-relaxed text-slate-200 outline-none placeholder:text-slate-600"
-          />
-        </Panel>
-
-        <Panel
-          label="Job Description"
-          hint={`${jd.length.toLocaleString("id-ID")} chars`}
-          accent="text-amber-300"
-        >
-          <textarea
-            value={jd}
-            onChange={(e) => setJd(e.target.value)}
-            spellCheck={false}
-            placeholder="Tempel Job Description di sini…"
-            className="h-[340px] w-full resize-y bg-transparent p-4 font-mono text-[13px] leading-relaxed text-slate-200 outline-none placeholder:text-slate-600"
-          />
-        </Panel>
-      </div>
-
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <div className="flex overflow-hidden rounded-lg border border-slate-700">
-          {(Object.keys(MODE_INFO) as Mode[]).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              title={MODE_INFO[m].hint}
-              className={`px-3.5 py-2.5 text-sm font-medium transition ${
-                mode === m
-                  ? "bg-slate-700 text-white"
-                  : "bg-slate-900 text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              {MODE_INFO[m].label}
-            </button>
-          ))}
+      <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+        <div className="mb-8">
+          <h1 className="text-xl font-semibold tracking-tight">Analisis kecocokan CV</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Bandingkan CV dengan Job Description. Skor dihitung berbobot, dan setiap match wajib
+            punya bukti dari CV.
+          </p>
         </div>
 
-        <button
-          onClick={analyze}
-          disabled={loading || uploading}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loading ? (
-            <>
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              Menganalisis…
-            </>
-          ) : (
-            "Analyze Job Fit"
-          )}
-        </button>
-
-        {loading && (
-          <button
-            onClick={stop}
-            className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm text-slate-300 transition hover:border-slate-600 hover:text-white"
+        <div className="grid gap-5 md:grid-cols-2">
+          <Field
+            label="Candidate CV"
+            icon={<FileText className="size-3.5" />}
+            hint={cvFile ? `${cvFile} · ${cv.length.toLocaleString("id-ID")} chars` : undefined}
+            footer="PDF, DOCX, TXT, atau MD · maks 15 MB"
+            action={
+              <>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept={ACCEPTED_FILES}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) uploadCv(file);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                  className="-mr-2 h-7 text-muted-foreground"
+                >
+                  {uploading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="size-3.5" />
+                  )}
+                  Upload
+                </Button>
+              </>
+            }
+            onFileDrop={uploadCv}
           >
-            Stop
-          </button>
-        )}
+            <textarea
+              value={cv}
+              onChange={(e) => setCv(e.target.value)}
+              spellCheck={false}
+              placeholder="Upload file, drag & drop ke sini, atau tempel isi CV…"
+              className="min-h-[280px] w-full resize-y bg-transparent p-3 font-mono text-[12.5px] leading-relaxed outline-none placeholder:text-muted-foreground/60"
+            />
+          </Field>
 
-        <button
-          onClick={clearAll}
-          className="rounded-lg border border-slate-800 px-4 py-2.5 text-sm text-slate-400 transition hover:border-slate-700 hover:text-slate-200"
-        >
-          Clear
-        </button>
+          <Field
+            label="Job Description"
+            icon={<Briefcase className="size-3.5" />}
+            hint={`${jd.length.toLocaleString("id-ID")} chars`}
+            footer="Tempel deskripsi lowongan lengkap beserta requirement-nya"
+          >
+            <textarea
+              value={jd}
+              onChange={(e) => setJd(e.target.value)}
+              spellCheck={false}
+              placeholder="Tempel Job Description di sini…"
+              className="min-h-[280px] w-full resize-y bg-transparent p-3 font-mono text-[12.5px] leading-relaxed outline-none placeholder:text-muted-foreground/60"
+            />
+          </Field>
+        </div>
 
-        <span className="text-xs text-slate-500">{MODE_INFO[mode].hint}</span>
+        <div className="mt-5 flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center rounded-md border border-border p-0.5">
+            {(Object.keys(MODE_INFO) as Mode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                title={MODE_INFO[m].hint}
+                className={cn(
+                  "rounded-[5px] px-2.5 py-1.5 text-xs font-medium transition-colors",
+                  mode === m
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {MODE_INFO[m].label}
+              </button>
+            ))}
+          </div>
+
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={loadSample}>
+              Contoh
+            </Button>
+
+            {loading ? (
+              <Button variant="outline" size="sm" onClick={stop}>
+                <Square className="size-3" />
+                Stop
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" onClick={clearAll}>
+                <Trash2 className="size-3.5" />
+                Clear
+              </Button>
+            )}
+
+            <Button onClick={analyze} disabled={loading || uploading}>
+              {loading ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Menganalisis
+                </>
+              ) : (
+                "Analyze Job Fit"
+              )}
+            </Button>
+          </div>
+        </div>
 
         {error && (
-          <span className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-            {error}
-          </span>
-        )}
-      </div>
-
-      <section className="mt-6">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium tracking-wide text-slate-400 uppercase">Result</h2>
-          {output && !loading && (
-            <div className="flex gap-2">
-              <button
-                onClick={copy}
-                className="rounded-md border border-slate-800 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-700 hover:text-white"
-              >
-                {copied ? "Copied!" : "Copy markdown"}
-              </button>
-              <button
-                onClick={download}
-                className="rounded-md border border-slate-800 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-700 hover:text-white"
-              >
-                Download .md
-              </button>
-            </div>
-          )}
-        </div>
-
-        {(thinking || (loading && !output)) && (
-          <div className="mb-3 overflow-hidden rounded-xl border border-slate-800/80 bg-slate-900/40">
-            <button
-              type="button"
-              onClick={() => setThinkingOpen((v) => !v)}
-              className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left"
-            >
-              <span className="flex items-center gap-2 text-xs font-medium tracking-wide text-slate-400 uppercase">
-                {loading && !output && (
-                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-600 border-t-violet-400" />
-                )}
-                Proses berpikir model
-                <span className="tabular-nums text-slate-600">{thinking.length.toLocaleString("id-ID")} chars</span>
-                {loading && <span className="tabular-nums text-slate-600">· {elapsed}s</span>}
-              </span>
-              <span className="text-xs text-slate-500">{thinkingOpen ? "sembunyikan" : "tampilkan"}</span>
-            </button>
-            {thinkingOpen && (
-              <pre className="max-h-56 overflow-y-auto border-t border-slate-800/80 px-4 py-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-slate-500">
-                {thinkingPreview || "menunggu token pertama dari model…"}
-              </pre>
-            )}
+          <div className="mt-5 flex items-start gap-2.5 rounded-md border border-destructive/40 bg-destructive/5 px-3.5 py-3 text-sm text-destructive">
+            <CircleAlert className="mt-px size-4 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
-        <div
-          ref={outputRef}
-          className="max-h-[70vh] min-h-[220px] overflow-y-auto rounded-xl border border-slate-800/80 bg-slate-950/60 p-5 backdrop-blur-sm"
-        >
-          {output ? (
-            <div className="md-body">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{output}</ReactMarkdown>
+        <section className="mt-8">
+          <div className="mb-3 flex h-8 items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-sm font-medium">Hasil analisis</h2>
+              {status && (
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                  {loading && <Loader2 className="size-2.5 animate-spin" />}
+                  {status}
+                  {loading && <span className="tabular-nums">{elapsed}s</span>}
+                </span>
+              )}
             </div>
-          ) : loading ? (
-            <p className="text-sm text-slate-500">
-              Menunggu jawaban… jawaban mulai muncul setelah model selesai berpikir.
-            </p>
-          ) : (
-            <p className="text-sm text-slate-600">
-              Hasil analisis akan muncul di sini dan streaming secara real-time.
-            </p>
+
+            {output && !loading && (
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={copy}>
+                  {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                  {copied ? "Tersalin" : "Copy"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={download}>
+                  <Download className="size-3.5" />
+                  .md
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {(thinking || (loading && !output)) && (
+            <div className="mb-3 overflow-hidden rounded-md border border-border">
+              <button
+                type="button"
+                onClick={() => setThinkingOpen((v) => !v)}
+                className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-muted/50"
+              >
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {loading && !output && <Loader2 className="size-3 animate-spin" />}
+                  <span className="font-medium">Proses berpikir model</span>
+                  <span className="font-mono text-[10px]">
+                    {thinking.length.toLocaleString("id-ID")} chars
+                  </span>
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                    thinkingOpen && "rotate-180",
+                  )}
+                />
+              </button>
+              {thinkingOpen && (
+                <pre className="max-h-56 overflow-y-auto border-t border-border bg-muted/30 px-3.5 py-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+                  {thinkingPreview || "Menunggu token pertama dari model…"}
+                </pre>
+              )}
+            </div>
           )}
-        </div>
-      </section>
-    </main>
+
+          <div
+            ref={outputRef}
+            className="max-h-[70vh] min-h-[220px] overflow-y-auto rounded-md border border-border bg-card p-4 sm:p-6"
+          >
+            {output ? (
+              <div className="md-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{output}</ReactMarkdown>
+                {loading && <span className="stream-caret" />}
+              </div>
+            ) : loading ? (
+              <div className="space-y-2.5 pt-1">
+                <p className="text-sm text-muted-foreground">
+                  Model sedang berpikir — jawaban muncul setelah tahap ini selesai.
+                </p>
+                <div className="space-y-2.5 pt-3">
+                  {[92, 78, 85, 64].map((w, i) => (
+                    <div
+                      key={i}
+                      className="h-2.5 animate-pulse rounded bg-muted"
+                      style={{ width: `${w}%`, animationDelay: `${i * 120}ms` }}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex min-h-[180px] flex-col items-center justify-center gap-2 text-center">
+                <ScanSearch className="size-5 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">
+                  Belum ada analisis. Isi CV dan Job Description, lalu tekan Analyze Job Fit.
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <footer className="mt-8 pb-4 text-center text-xs text-muted-foreground">
+          Prompt bisa diubah di{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+            prompts/job-fit-analysis-compact.md
+          </code>{" "}
+          · skor adalah estimasi analitis, bukan prediksi rekrutmen
+        </footer>
+      </main>
+    </div>
   );
 }
 
-function Panel({
+function Button({
+  variant = "default",
+  size = "default",
+  className,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "default" | "outline" | "ghost";
+  size?: "default" | "sm" | "icon";
+}) {
+  return (
+    <button
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors",
+        "focus-visible:ring-[3px] focus-visible:ring-ring/20 focus-visible:outline-none",
+        "disabled:pointer-events-none disabled:opacity-50",
+        variant === "default" && "bg-primary text-primary-foreground hover:bg-primary/90",
+        variant === "outline" && "border border-border bg-background hover:bg-muted",
+        variant === "ghost" && "hover:bg-muted",
+        size === "default" && "h-9 px-4",
+        size === "sm" && "h-8 gap-1.5 px-3 text-xs",
+        size === "icon" && "size-8",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+function Field({
   label,
+  icon,
   hint,
-  accent,
+  footer,
   action,
   onFileDrop,
   children,
 }: {
   label: string;
-  hint: string;
-  accent: string;
+  icon: React.ReactNode;
+  hint?: string;
+  footer?: string;
   action?: React.ReactNode;
   onFileDrop?: (file: File) => void;
   children: React.ReactNode;
@@ -426,25 +583,39 @@ function Panel({
     : {};
 
   return (
-    <div
-      {...dropProps}
-      className={`relative overflow-hidden rounded-xl border bg-slate-950/60 backdrop-blur-sm transition ${
-        dragging ? "border-emerald-400/70 ring-2 ring-emerald-400/20" : "border-slate-800/80"
-      }`}
-    >
-      <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 bg-slate-900/40 px-4 py-2.5">
-        <span className={`text-xs font-semibold tracking-wide uppercase ${accent}`}>{label}</span>
+    <div {...dropProps} className="flex flex-col">
+      <div className="mb-2 flex h-7 items-center justify-between gap-2">
+        <label className="flex items-center gap-1.5 text-sm font-medium">
+          <span className="text-muted-foreground">{icon}</span>
+          {label}
+        </label>
         <div className="flex items-center gap-2">
-          <span className="hidden text-[11px] text-slate-500 sm:inline">{hint}</span>
+          {hint && (
+            <span className="hidden font-mono text-[10px] text-muted-foreground sm:inline">
+              {hint}
+            </span>
+          )}
           {action}
         </div>
       </div>
-      {children}
-      {dragging && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-950/85 text-sm font-medium text-emerald-300">
-          Lepaskan file untuk di-upload
-        </div>
-      )}
+
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-md border bg-transparent transition-shadow",
+          dragging
+            ? "border-ring ring-[3px] ring-ring/20"
+            : "border-input focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20",
+        )}
+      >
+        {children}
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 grid place-items-center bg-background/85 text-sm font-medium">
+            Lepaskan file untuk di-upload
+          </div>
+        )}
+      </div>
+
+      {footer && <p className="mt-1.5 text-xs text-muted-foreground">{footer}</p>}
     </div>
   );
 }
