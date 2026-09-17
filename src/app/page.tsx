@@ -20,17 +20,11 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { CATEGORY_LABEL, stripJsonBlock, type ScoreBreakdown, type Status } from "@/lib/score";
 
 const ACCEPTED_FILES = ".pdf,.docx,.txt,.md";
 const THINKING_PREVIEW_CHARS = 4000;
 const FLUSH_INTERVAL_MS = 100;
-
-type Mode = "fast" | "detailed";
-
-const MODE_INFO: Record<Mode, { label: string; hint: string }> = {
-  fast: { label: "Cepat", hint: "prompt ringkas · ±15 detik" },
-  detailed: { label: "Detail", hint: "prompt lengkap · ±45 detik" },
-};
 
 const SAMPLE_CV = `Zacky Rafian — Backend Developer
 
@@ -46,6 +40,14 @@ PostgreSQL, Docker.
 Preferred: AWS, Kubernetes, React.js.
 Education: S1 Ilmu Komputer.`;
 
+const STATUS_DOT: Record<Status, string> = {
+  MATCH: "bg-emerald-500",
+  EQUIVALENT: "bg-emerald-500",
+  PARTIAL: "bg-amber-500",
+  RELATED: "bg-amber-500",
+  MISSING: "bg-muted-foreground/40",
+};
+
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
@@ -54,10 +56,11 @@ export default function Home() {
   const [cv, setCv] = useState("");
   const [jd, setJd] = useState("");
   const [cvFile, setCvFile] = useState("");
-  const [mode, setMode] = useState<Mode>("fast");
   const [output, setOutput] = useState("");
   const [thinking, setThinking] = useState("");
   const [thinkingOpen, setThinkingOpen] = useState(false);
+  const [score, setScore] = useState<ScoreBreakdown | null>(null);
+  const [fromCache, setFromCache] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -68,7 +71,7 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const textRef = useRef("");
+  const rawRef = useRef("");
   const thinkingRef = useRef("");
   const lastFlushRef = useRef(0);
   const gotTextRef = useRef(false);
@@ -99,7 +102,7 @@ export default function Home() {
     const now = performance.now();
     if (!force && now - lastFlushRef.current < FLUSH_INTERVAL_MS) return;
     lastFlushRef.current = now;
-    setOutput(textRef.current);
+    setOutput(stripJsonBlock(rawRef.current));
     setThinking(thinkingRef.current);
   }, []);
 
@@ -130,10 +133,12 @@ export default function Home() {
     setError("");
     setOutput("");
     setThinking("");
+    setScore(null);
+    setFromCache(false);
     setThinkingOpen(true);
     setCopied(false);
     setLoading(true);
-    textRef.current = "";
+    rawRef.current = "";
     thinkingRef.current = "";
     lastFlushRef.current = 0;
     gotTextRef.current = false;
@@ -145,7 +150,7 @@ export default function Home() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cv, jd, mode }),
+        body: JSON.stringify({ cv, jd }),
         signal: controller.signal,
       });
 
@@ -169,18 +174,28 @@ export default function Home() {
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          let evt: { kind?: string; text?: string };
+          let evt: { kind?: string; text?: string; score?: ScoreBreakdown; cached?: boolean };
           try {
             evt = JSON.parse(line);
           } catch {
             continue;
           }
+
+          if (evt.kind === "meta") {
+            setFromCache(Boolean(evt.cached));
+            continue;
+          }
+          if (evt.kind === "score" && evt.score) {
+            setScore(evt.score);
+            continue;
+          }
+          if (evt.kind === "done") continue;
           if (!evt.text) continue;
 
           if (evt.kind === "thinking") {
             thinkingRef.current += evt.text;
           } else {
-            textRef.current += evt.text;
+            rawRef.current += evt.text;
             if (!gotTextRef.current) {
               gotTextRef.current = true;
               setThinkingOpen(false);
@@ -202,7 +217,7 @@ export default function Home() {
       abortRef.current = null;
       flush(true);
     }
-  }, [cv, jd, mode, flush]);
+  }, [cv, jd, flush]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -235,6 +250,7 @@ export default function Home() {
     setCvFile("");
     setOutput("");
     setThinking("");
+    setScore(null);
     setError("");
   }, [stop]);
 
@@ -274,7 +290,7 @@ export default function Home() {
           <div className="flex items-center gap-1.5">
             <span className="hidden items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground sm:inline-flex">
               <ShieldCheck className="size-3" />
-              no fabrication
+              skor dihitung, bukan ditebak
             </span>
             <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Ganti tema">
               {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
@@ -292,8 +308,8 @@ export default function Home() {
         <div className="mb-8">
           <h1 className="text-xl font-semibold tracking-tight">Analisis kecocokan CV</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            Bandingkan CV dengan Job Description. Skor dihitung berbobot, dan setiap match wajib
-            punya bukti dari CV.
+            Model hanya menilai status tiap requirement; persentasenya dihitung di server dari tabel
+            itu, jadi input yang sama selalu menghasilkan skor yang sama.
           </p>
         </div>
 
@@ -359,31 +375,12 @@ export default function Home() {
           </Field>
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center rounded-md border border-border p-0.5">
-            {(Object.keys(MODE_INFO) as Mode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                title={MODE_INFO[m].hint}
-                className={cn(
-                  "rounded-[5px] px-2.5 py-1.5 text-xs font-medium transition-colors",
-                  mode === m
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {MODE_INFO[m].label}
-              </button>
-            ))}
-          </div>
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={loadSample}>
+            Contoh
+          </Button>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={loadSample}>
-              Contoh
-            </Button>
-
             {loading ? (
               <Button variant="outline" size="sm" onClick={stop}>
                 <Square className="size-3" />
@@ -472,6 +469,8 @@ export default function Home() {
             </div>
           )}
 
+          {score && <ScoreCard score={score} fromCache={fromCache} />}
+
           <div
             ref={outputRef}
             className="max-h-[70vh] min-h-[220px] overflow-y-auto rounded-md border border-border bg-card p-4 sm:p-6"
@@ -510,11 +509,96 @@ export default function Home() {
         <footer className="mt-8 pb-4 text-center text-xs text-muted-foreground">
           Prompt bisa diubah di{" "}
           <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-            prompts/job-fit-analysis-compact.md
+            prompts/job-fit-analysis.md
           </code>{" "}
           · skor adalah estimasi analitis, bukan prediksi rekrutmen
         </footer>
       </main>
+    </div>
+  );
+}
+
+function ScoreCard({ score, fromCache }: { score: ScoreBreakdown; fromCache: boolean }) {
+  return (
+    <div className="mb-3 rounded-md border border-border bg-card p-5 sm:p-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-xs text-muted-foreground">Job Fit</p>
+          <p className="text-4xl font-semibold tracking-tight tabular-nums">{score.overall}%</p>
+        </div>
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <span>{score.requirements.length} requirement</span>
+          {fromCache && (
+            <span className="rounded border border-border px-1.5 py-0.5">hasil cache</span>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-6 space-y-2.5">
+        {score.categories.map((c) => (
+          <div key={c.category} className="flex items-center gap-3">
+            <span className="w-32 shrink-0 text-xs text-muted-foreground">{c.label}</span>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-foreground/70"
+                style={{ width: `${c.score}%` }}
+              />
+            </div>
+            <span className="w-9 shrink-0 text-right text-xs tabular-nums">{c.score}%</span>
+            <span className="hidden w-20 shrink-0 text-right text-[11px] text-muted-foreground sm:block">
+              {c.count} item
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-3 text-[11px] text-muted-foreground">
+        Skor total = rata-rata berbobot prioritas (HIGH ×3, MEDIUM ×2, LOW ×1) dari seluruh
+        requirement. Bar di atas hanya rincian per kategori.
+      </p>
+
+      <details className="group mt-5">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+          <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+          Lihat {score.requirements.length} requirement dan statusnya
+        </summary>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Requirement</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Kategori</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Prioritas</th>
+                <th className="px-2 py-2 text-left font-medium text-muted-foreground">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {score.requirements.map((r, i) => (
+                <tr key={i} className="border-b border-border/60 last:border-0">
+                  <td className="px-2 py-2 align-top">
+                    <span className="text-foreground">{r.requirement}</span>
+                    {r.evidence && (
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground italic">
+                        “{r.evidence}”
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 align-top text-muted-foreground">
+                    {CATEGORY_LABEL[r.category]}
+                  </td>
+                  <td className="px-2 py-2 align-top text-muted-foreground">{r.priority}</td>
+                  <td className="px-2 py-2 align-top">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className={cn("size-1.5 rounded-full", STATUS_DOT[r.status])} />
+                      {r.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   );
 }
