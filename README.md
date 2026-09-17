@@ -93,6 +93,47 @@ edit it without touching any code. It requires the model to:
 3. Write the narrative sections in a fixed format.
 4. Emit the machine-readable table as a fenced `json` block at the very end.
 
+## Mencari lowongan (`/cari`)
+
+Halaman terpisah dari halaman analisis. CV diubah jadi kata kunci pencarian, lalu
+lowongan diambil dari dua papan lowongan Indonesia dan diperingkat.
+
+```
+src/app/cari/page.tsx        -> UI: input CV, filter, daftar hasil
+src/app/api/jobs/route.ts     -> POST { cv, keyword } -> profil + lowongan terperingkat
+src/lib/profile.ts            -> CV -> SearchProfile lewat satu panggilan LLM (di-cache per CV)
+src/lib/jobs.ts               -> adapter Kalibrr + JobStreet, normalisasi, dedupe
+src/lib/match.ts              -> skor tumpang tindih kata kunci, tanpa LLM
+prompts/search-profile.md     -> prompt penurun profil
+```
+
+Alurnya: CV -> profil (3-5 judul target + skill inti + skill pendukung) -> query ke
+tiap sumber -> gabung dan dedupe -> peringkat lokal -> daftar. Klik **Analisis** pada
+sebuah hasil untuk mengirim JD-nya ke halaman analisis lewat `localStorage`.
+
+### Dua angka, dua arti
+
+Halaman ini menampilkan **kecocokan kata kunci**, bukan skor Job Fit. Angka itu cuma
+tumpang tindih kata kunci CV dengan teks lowongan - instan dan gratis, tapi kasar.
+Ini disengaja: menganalisis 300 lowongan lewat LLM butuh sekitar 100 menit, sedangkan
+peringkat lokal selesai di bawah satu detik. Karena itu peringkat lokal dipakai untuk
+menyaring, dan skor Job Fit hanya dihitung untuk lowongan yang benar-benar kamu pilih.
+
+Label keduanya sengaja dibedakan supaya angka heuristik tidak disangka punya bobot
+analitis yang sama dengan skor Job Fit.
+
+### Sumber data dan batasannya
+
+| Sumber | Cakupan | Teks JD | Catatan |
+| ------ | ------- | ------- | ------- |
+| Kalibrr | lebih sedikit | **penuh** (`description` + `qualifications`) | hasilnya bisa langsung dianalisis |
+| JobStreet | lebih banyak | hanya ringkasan ~200 char | detail page diblokir Cloudflare, jadi harus dibuka di sana |
+
+Keduanya adalah endpoint pencarian internal yang tidak didokumentasikan, bukan API
+publik resmi. Artinya bisa berubah atau memblokir sewaktu-waktu. `searchAllSources`
+memakai `Promise.allSettled`, jadi kalau satu sumber mati sumber lain tetap jalan dan
+UI menandainya sebagai gagal alih-alih menampilkan error total.
+
 ## CV upload
 
 The CV panel accepts **PDF**, **DOCX**, **TXT**, and **MD**, either via the upload
