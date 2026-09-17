@@ -8,6 +8,8 @@ export type Provider = {
   maxTokens: number;
 };
 
+export type StreamChunk = { kind: "thinking" | "text"; text: string };
+
 const DEFAULT_MAX_TOKENS = 32000;
 
 export function getProvider(): Provider {
@@ -32,20 +34,31 @@ function parseSseLine(line: string): string | null {
   return trimmed.slice(5).trim();
 }
 
-function readDelta(evt: SseEvent, api: ApiFormat): { text: string; stopReason?: string } {
+function readDelta(evt: SseEvent, api: ApiFormat): { chunk?: StreamChunk; stopReason?: string } {
   if (api === "anthropic-messages") {
     if (evt.type === "error") {
       throw new Error(evt.error?.message || "AI provider returned an error.");
     }
-    if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
-      return { text: evt.delta.text ?? "" };
+    if (evt.type === "content_block_delta") {
+      if (evt.delta?.type === "text_delta") {
+        return { chunk: { kind: "text", text: evt.delta.text ?? "" } };
+      }
+      if (evt.delta?.type === "thinking_delta") {
+        return { chunk: { kind: "thinking", text: evt.delta.thinking ?? "" } };
+      }
     }
     if (evt.type === "message_delta") {
-      return { text: "", stopReason: evt.delta?.stop_reason ?? undefined };
+      return { stopReason: evt.delta?.stop_reason ?? undefined };
     }
-    return { text: "" };
+    return {};
   }
-  return { text: evt.choices?.[0]?.delta?.content ?? "" };
+
+  const delta = evt.choices?.[0]?.delta;
+  const text = delta?.content ?? "";
+  const reasoning = delta?.reasoning_content ?? delta?.reasoning ?? "";
+  if (reasoning) return { chunk: { kind: "thinking", text: reasoning } };
+  if (text) return { chunk: { kind: "text", text } };
+  return {};
 }
 
 async function requestStream(
@@ -78,9 +91,12 @@ async function requestStream(
 
 /**
  * Streams a single-turn completion from the configured provider.
- * Yields raw text chunks as they arrive.
+ * Yields reasoning ("thinking") and answer ("text") chunks as they arrive.
  */
-export async function* streamCompletion(prompt: string, signal?: AbortSignal): AsyncGenerator<string> {
+export async function* streamCompletion(
+  prompt: string,
+  signal?: AbortSignal,
+): AsyncGenerator<StreamChunk> {
   const provider = getProvider();
 
   if (!provider.apiKey) {
@@ -102,25 +118,18 @@ export async function* streamCompletion(prompt: string, signal?: AbortSignal): A
     headers["authorization"] = `Bearer ${provider.apiKey}`;
   }
 
-  const body = isAnthropic
-    ? {
-        model: provider.model,
-        max_tokens: provider.maxTokens,
-        stream: true,
-        messages: [{ role: "user", content: prompt }],
-      }
-    : {
-        model: provider.model,
-        max_tokens: provider.maxTokens,
-        stream: true,
-        messages: [{ role: "user", content: prompt }],
-      };
+  const body = {
+    model: provider.model,
+    max_tokens: provider.maxTokens,
+    stream: true,
+    messages: [{ role: "user", content: prompt }],
+  };
 
   const res = await requestStream(url, headers, body, signal);
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let produced = false;
+  let producedText = false;
   let stopReason: string | undefined;
 
   while (true) {
@@ -148,19 +157,20 @@ export async function* streamCompletion(prompt: string, signal?: AbortSignal): A
 
       const delta = readDelta(evt, provider.api);
       if (delta.stopReason) stopReason = delta.stopReason;
-      if (delta.text) {
-        produced = true;
-        yield delta.text;
+      if (delta.chunk?.text) {
+        if (delta.chunk.kind === "text") producedText = true;
+        yield delta.chunk;
       }
     }
   }
 
-  if (!produced) {
-    const reason = stopReason === "max_tokens"
-      ? "seluruh budget token habis sebelum model sempat menulis jawaban (model ini memakai reasoning panjang)"
-      : `model berhenti tanpa mengeluarkan teks${stopReason ? ` (stop_reason: ${stopReason})` : ""}`;
+  if (!producedText) {
+    const reason =
+      stopReason === "max_tokens"
+        ? "seluruh budget token habis sebelum model sempat menulis jawaban"
+        : `model berhenti tanpa mengeluarkan teks${stopReason ? ` (stop_reason: ${stopReason})` : ""}`;
     throw new Error(
-      `Tidak ada jawaban yang dihasilkan: ${reason}. Naikkan AI_MAX_TOKENS (sekarang ${provider.maxTokens}) atau pilih model non-reasoning.`,
+      `Tidak ada jawaban yang dihasilkan: ${reason}. Naikkan AI_MAX_TOKENS (sekarang ${provider.maxTokens}) atau pilih mode Cepat.`,
     );
   }
 }

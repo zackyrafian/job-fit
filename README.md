@@ -1,22 +1,36 @@
 # Job Fit Analyzer (JSA)
 
-A small Next.js app that runs the [`job-fit-analysis.md`](./prompts/job-fit-analysis.md)
-prompt: upload or paste a CV plus a Job Description, and get a weighted Job Fit
-analysis that never fabricates experience.
+A small Next.js app that runs the [`job-fit-analysis`](./prompts) prompt: upload or
+paste a CV plus a Job Description, and get a weighted Job Fit analysis that never
+fabricates experience.
 
 ## How it works
 
 ```
 src/app/page.tsx              -> CV / JD inputs (incl. PDF/DOCX upload) + streaming markdown output
-src/app/api/analyze/route.ts  -> POST { cv, jd } -> streams plain-text markdown
+src/app/api/analyze/route.ts  -> POST { cv, jd, mode } -> streams NDJSON { kind, text }
 src/app/api/extract/route.ts  -> POST multipart file -> { text } for PDF / DOCX / TXT / MD
-src/lib/prompt.ts             -> loads prompts/job-fit-analysis.md, fills {{CV_CONTENT}} / {{JOB_DESCRIPTION}}
+src/lib/prompt.ts             -> picks the template for the mode and fills {{CV_CONTENT}} / {{JOB_DESCRIPTION}}
 src/lib/extract.ts            -> PDF (unpdf) and DOCX (mammoth) text extraction
 src/lib/ai.ts                 -> provider abstraction (OpenAI-compatible or Anthropic-compatible)
 ```
 
-The prompt lives in `prompts/job-fit-analysis.md` and is read at runtime — edit it
-without touching any code.
+## Two analysis modes
+
+Both modes use the same rules and produce the same 10 sections — they differ only
+in how verbose the instruction prompt is. The model's internal thinking scales with
+prompt size, so the shorter prompt is dramatically faster.
+
+| Mode       | Template                             | Prompt size | Typical run |
+| ---------- | ------------------------------------ | ----------- | ----------- |
+| `fast`     | `prompts/job-fit-analysis-compact.md` | ~2.8k chars | ~15s        |
+| `detailed` | `prompts/job-fit-analysis.md`         | ~10k chars  | ~45s        |
+
+`fast` is the default. Both templates are read from disk at runtime, so you can
+tune the wording without touching any code.
+
+The reasoning stream is surfaced in the UI: a collapsible "Proses berpikir model"
+panel shows the model's thinking live and auto-collapses once the answer starts.
 
 ## CV upload
 
@@ -48,15 +62,16 @@ npm run dev                  # http://localhost:3000
 
 `.env.local` is gitignored. Restart the server after changing it.
 
-### Reasoning models need a big token budget
+### Notes on reasoning models
 
-`claude-opus-5` on the local gateway is a reasoning model: on the full prompt it
-spends ~38k characters of internal thinking before emitting the first visible
-character, which takes roughly 35–45 seconds. If `AI_MAX_TOKENS` is too small,
-the whole budget is consumed by thinking and the API returns an empty body.
+`claude-opus-5` on the local gateway is a reasoning model, and the gateway ignores
+`thinking` parameters — thinking cannot be disabled. Two consequences:
 
-The route detects that case and reports it instead of showing a blank result.
-The UI shows a "model sedang berpikir…" counter so the wait is not a black box.
+- The token budget must be generous. On the full prompt the model spends ~35k
+  characters thinking before emitting a visible character; with a small
+  `AI_MAX_TOKENS` the whole budget is consumed and the API returns an empty body.
+  The route detects that and reports it instead of showing a blank result.
+- Latency is driven by prompt size. That is why `fast` mode exists.
 
 ## Production
 
