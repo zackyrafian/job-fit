@@ -203,3 +203,8 @@ Nixpacks falls back to its Node 18 default and `next build` fails with
 npm run build
 npm start
 ```
+
+`npm start` listens on port **3322** by default. Setting `PORT` overrides it, so a
+platform that manages the port (Coolify/Nixpacks) still wins and the app stays in sync
+with whatever the reverse proxy is pointed at. `npm run dev` is unaffected and stays on
+3000.
