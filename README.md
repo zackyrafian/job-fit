@@ -165,6 +165,13 @@ cp .env.example .env.local   # then fill in your values
 npm run dev                  # http://localhost:3000
 ```
 
+### Node version
+
+Node **22** is required: `unpdf` needs ≥22 and Next.js 16 needs ≥20.9. It is pinned in
+`.nvmrc`, which Nixpacks/Coolify reads when building the deploy image. Without that file
+Nixpacks falls back to its Node 18 default and `next build` fails with
+`You are using Node.js 18.20.5. For Next.js, Node.js version ">=20.9.0" is required.`
+
 ### Environment variables
 
 | Variable         | Description                                                        |
