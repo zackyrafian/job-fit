@@ -1,19 +1,30 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Fraunces, Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
+const fraunces = Fraunces({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-fraunces",
+  display: "swap",
+});
+
+const instrument = Instrument_Sans({
+  subsets: ["latin"],
+  variable: "--font-instrument",
+  display: "swap",
+});
+
+const jetbrains = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Job Fit Analyzer",
-  description: "Analyze how well a CV matches a Job Description — without fabricating experience.",
+  title: "Rekrut — Analisis Kecocokan CV",
+  description:
+    "Analisis kecocokan CV terhadap deskripsi pekerjaan: keterampilan cocok, kecocokan sebagian, kesenjangan, analisis kata kunci, dan saran perbaikan.",
 };
-
-const THEME_INIT = `try{var t=localStorage.getItem("theme");if(t!=="light")document.documentElement.classList.add("dark")}catch(e){document.documentElement.classList.add("dark")}`;
 
 export default function RootLayout({
   children,
@@ -21,11 +32,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" className={inter.variable} suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
-      </head>
-      <body className="font-sans antialiased">{children}</body>
+    <html
+      lang="id"
+      className={`${fraunces.variable} ${instrument.variable} ${jetbrains.variable}`}
+      suppressHydrationWarning
+    >
+      <body className="bg-paper font-sans text-ink antialiased">{children}</body>
     </html>
   );
 }
