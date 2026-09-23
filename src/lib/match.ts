@@ -64,6 +64,35 @@ function preNormalize(text: string): string {
     .replace(/tailwind\s*css/gi, " tailwindcss ");
 }
 
+/**
+ * True when two strings name the same thing through a known alias pair
+ * (Golang/Go, Postgres/PostgreSQL, …). Used to validate EQUIVALENT decisions:
+ * an EQUIVALENT that no alias group backs is downgraded to RELATED.
+ */
+export function knownAliasMatch(a: string, b: string): boolean {
+  const ca = canonicalize(a);
+  const cb = canonicalize(b);
+  if (!ca || !cb) return false;
+
+  const forms = (text: string) =>
+    ALIAS_GROUPS.flatMap((group) =>
+      group.filter((alias) =>
+        new RegExp(`(^|[^a-z0-9+#])${escapeRegex(alias)}([^a-z0-9+#]|$)`).test(text),
+      ),
+    );
+
+  const inA = new Set(forms(ca));
+  const inB = new Set(forms(cb));
+  if (inA.size === 0 || inB.size === 0) return false;
+
+  for (const group of ALIAS_GROUPS) {
+    const hitA = group.some((alias) => inA.has(alias));
+    const hitB = group.some((alias) => inB.has(alias));
+    if (hitA && hitB) return true;
+  }
+  return false;
+}
+
 export function canonicalize(text: string): string {
   return preNormalize(text)
     .toLowerCase()

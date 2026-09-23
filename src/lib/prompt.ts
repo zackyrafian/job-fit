@@ -1,14 +1,19 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-const PROMPT_PATH = path.join(process.cwd(), "prompts", "job-fit-analysis.md");
+const PROMPT_DIR = path.join(process.cwd(), "prompts");
+const templates = new Map<string, string>();
 
-let cachedTemplate: string | null = null;
+export async function loadTemplateFile(name: string): Promise<string> {
+  const cached = templates.get(name);
+  if (cached) return cached;
+  const content = await readFile(path.join(PROMPT_DIR, name), "utf8");
+  templates.set(name, content);
+  return content;
+}
 
-export async function loadTemplate(): Promise<string> {
-  if (cachedTemplate) return cachedTemplate;
-  cachedTemplate = await readFile(PROMPT_PATH, "utf8");
-  return cachedTemplate;
+export function loadTemplate(): Promise<string> {
+  return loadTemplateFile("job-fit-analysis.md");
 }
 
 /**
@@ -19,4 +24,16 @@ export function fillTemplate(template: string, cv: string, jd: string): string {
   return template
     .replaceAll("{{CV_CONTENT}}", () => cv)
     .replaceAll("{{JOB_DESCRIPTION}}", () => jd);
+}
+
+export function fillDecisionsTemplate(
+  template: string,
+  cv: string,
+  jd: string,
+  decisions: string,
+): string {
+  return template
+    .replaceAll("{{CV_CONTENT}}", () => cv)
+    .replaceAll("{{JOB_DESCRIPTION}}", () => jd)
+    .replaceAll("{{DECISIONS}}", () => decisions);
 }

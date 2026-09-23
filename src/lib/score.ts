@@ -13,12 +13,18 @@ export type Status = (typeof STATUSES)[number];
 export type Category = (typeof CATEGORIES)[number];
 export type Priority = (typeof PRIORITIES)[number];
 
+export type DecidedBy = "jev" | "code" | "code_override";
+
 export type Requirement = {
   requirement: string;
   category: Category;
   priority: Priority;
   status: Status;
   evidence: string;
+  probability?: number;
+  confidence?: number;
+  decidedBy?: DecidedBy;
+  needsReview?: boolean;
 };
 
 export type CategoryScore = {
@@ -88,6 +94,11 @@ function normalizeEnum<T extends string>(value: unknown, allowed: readonly T[]):
   const upper = value.trim().toUpperCase();
   return (allowed as readonly string[]).includes(upper) ? (upper as T) : null;
 }
+
+export const coerceCategory = (value: unknown): Category | null => normalizeCategory(value);
+export const coercePriority = (value: unknown): Priority | null =>
+  normalizeEnum(value, PRIORITIES);
+export const coerceStatus = (value: unknown): Status | null => normalizeEnum(value, STATUSES);
 
 export function parseRequirements(raw: unknown): Requirement[] {
   const list = Array.isArray(raw)
