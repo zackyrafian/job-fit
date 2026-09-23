@@ -9,6 +9,7 @@ export type JobMatch = {
   missing: string[];
   matchedCore: number;
   coreTotal: number;
+  titleMatches: number;
 };
 
 const ALIAS_GROUPS: string[][] = [
@@ -104,8 +105,9 @@ function mentions(canonicalText: string, variants: string[]): boolean {
   return new RegExp(`(^|[^a-z0-9+#])(?:${alternation})([^a-z0-9+#]|$)`, "i").test(canonicalText);
 }
 
-export function matchJob(description: string, skills: SkillGroup): JobMatch {
-  const text = canonicalize(description);
+export function matchJob(title: string, description: string, skills: SkillGroup): JobMatch {
+  const titleText = canonicalize(title);
+  const bodyText = canonicalize(description);
 
   const core = [...new Set(skills.core)].filter(Boolean);
   const other = [...new Set(skills.other)].filter(Boolean).filter((s) => !core.includes(s));
@@ -115,6 +117,7 @@ export function matchJob(description: string, skills: SkillGroup): JobMatch {
   let weightedHit = 0;
   let weightedTotal = 0;
   let matchedCore = 0;
+  let titleMatches = 0;
 
   for (const [list, weight] of [
     [core, 2],
@@ -122,11 +125,14 @@ export function matchJob(description: string, skills: SkillGroup): JobMatch {
   ] as const) {
     for (const skill of list) {
       weightedTotal += weight;
-      const hit = mentions(text, variantsFor(skill));
+      const variants = variantsFor(skill);
+      const inTitle = mentions(titleText, variants);
+      const hit = inTitle || mentions(bodyText, variants);
       if (hit) {
         weightedHit += weight;
         matched.push(skill);
         if (weight === 2) matchedCore += 1;
+        if (inTitle) titleMatches += 1;
       } else {
         missing.push(skill);
       }
@@ -139,5 +145,6 @@ export function matchJob(description: string, skills: SkillGroup): JobMatch {
     missing,
     matchedCore,
     coreTotal: core.length,
+    titleMatches,
   };
 }

@@ -96,20 +96,54 @@ edit it without touching any code. It requires the model to:
 ## Mencari lowongan (`/cari`)
 
 Halaman terpisah dari halaman analisis. CV diubah jadi kata kunci pencarian, lalu
-lowongan diambil dari dua papan lowongan Indonesia dan diperingkat.
+lowongan diambil dari Glints dan JobStreet dan diperingkat.
 
 ```
 src/app/cari/page.tsx        -> UI: input CV, filter, daftar hasil
-src/app/api/jobs/route.ts     -> POST { cv, keyword } -> profil + lowongan terperingkat
+src/app/api/jobs/route.ts     -> POST { cv, keyword, location, locationStrict } -> profil + lowongan
 src/lib/profile.ts            -> CV -> SearchProfile lewat satu panggilan LLM (di-cache per CV)
-src/lib/jobs.ts               -> adapter Kalibrr + JobStreet, normalisasi, dedupe
-src/lib/match.ts              -> skor tumpang tindih kata kunci, tanpa LLM
+src/lib/jobs.ts               -> adapter Glints + JobStreet, normalisasi, dedupe
+src/lib/match.ts              -> skor tumpang tindih kata kunci + sinyal judul, tanpa LLM
+src/lib/freshness.ts          -> filter 24 jam terakhir + label umur lowongan
 prompts/search-profile.md     -> prompt penurun profil
 ```
 
-Alurnya: CV -> profil (3-5 judul target + skill inti + skill pendukung) -> query ke
-tiap sumber -> gabung dan dedupe -> peringkat lokal -> daftar. Klik **Analisis** pada
-sebuah hasil untuk mengirim JD-nya ke halaman analisis lewat `localStorage`.
+Alurnya: CV -> profil (3-5 judul target + skill inti + skill pendukung) -> sampai 5
+query ke tiap sumber -> gabung dan dedupe -> saring ke lowongan 24 jam terakhir ->
+peringkat lokal -> daftar. Tiap query memanggil kedua sumber: Glints `pageSize=50`
+(satu halaman), JobStreet `pageSize=50` + `daterange=1`. Klik **Analisis** pada sebuah
+hasil untuk mengirim JD-nya ke halaman analisis lewat `localStorage`.
+
+### Kebaruan lowongan
+
+Hanya lowongan **24 jam terakhir** yang ditampilkan. Tidak ada pelebaran ke 3 hari, 7
+hari, atau "semua umur": kalau hasilnya sedikit atau kosong, halaman mengatakannya
+apa adanya alih-alih mengisi daftar dengan lowongan lama. Lowongan yang tanggalnya
+tidak bisa dibaca (`postedAt` kosong atau tidak valid) dibuang, bukan diikutkan.
+
+`freshness` (`targetHours`, `windowHours`, `label`, `targetCount`) dan `totalJobs`
+dikirim ke UI, jadi kalau ada hasil yang dibuang karena lewat 24 jam pengguna diberi
+tahu jumlahnya. Di dalam jendela itu urutannya relevansi CV dulu, lalu kecocokan
+lokasi, jumlah skill yang muncul di judul, jumlah skill inti yang cocok, baru
+kebaruan sebagai penentu seri. `postedLabel` dinormalkan jadi label Indonesia
+("2 jam lalu") untuk kedua sumber.
+
+Penyaringan juga dibantu di sisi sumber:
+
+- JobStreet selalu diminta dengan `daterange=1`, jadi halaman yang dikembalikan sudah
+  dibatasi ke 24 jam.
+- Glints dikirimi `lastUpdatedAtRange: "PAST_24_HOURS"`, tapi field itu menyaring
+  **`updatedAt`, bukan `createdAt`** — lowongan yang dibuat berhari-hari lalu tapi
+  baru diperbarui tetap lolos. Karena itu umur sebenarnya tetap dipotong di
+  `selectByFreshness` dari `createdAt`.
+
+### Lokasi
+
+`profile.location` dari CV dipakai sebagai **preferensi**, bukan filter: lowongan yang
+lokasinya cocok naik peringkat di antara skor yang setara dan diberi chip "lokasi
+cocok". Kalau mau disaring ketat, isi kolom **Lokasi** di form lalu centang **wajib** —
+itu mengirim `where` ke JobStreet dan menyaring Glints di server. Kolom Lokasi yang
+diisi selalu menang atas lokasi hasil ekstraksi CV.
 
 ### Dua angka, dua arti
 
@@ -126,13 +160,35 @@ analitis yang sama dengan skor Job Fit.
 
 | Sumber | Cakupan | Teks JD | Catatan |
 | ------ | ------- | ------- | ------- |
-| Kalibrr | lebih sedikit | **penuh** (`description` + `qualifications`) | hasilnya bisa langsung dianalisis |
-| JobStreet | lebih banyak | hanya ringkasan ~200 char | detail page diblokir Cloudflare, jadi harus dibuka di sana |
+| Glints | lebih sedikit | **penuh** — diambil dari halaman detail (`descriptionJsonString`), bukan dari hasil pencarian | `pageSize=50`, hanya halaman 1; endpoint GraphQL internal di balik Cloudflare WAF |
+| JobStreet | lebih banyak | ringkasan saja; teaser yang cuma nama perusahaan dibuang | punya `daterange` + `where`; detail page diblokir Cloudflare |
 
-Keduanya adalah endpoint pencarian internal yang tidak didokumentasikan, bukan API
-publik resmi. Artinya bisa berubah atau memblokir sewaktu-waktu. `searchAllSources`
-memakai `Promise.allSettled`, jadi kalau satu sumber mati sumber lain tetap jalan dan
-UI menandainya sebagai gagal alih-alih menampilkan error total.
+Keduanya adalah endpoint internal yang tidak didokumentasikan, bukan API publik resmi.
+Artinya bisa berubah atau memblokir sewaktu-waktu. `searchAllSources` memakai
+`Promise.allSettled`, jadi kalau satu sumber mati sumber lain tetap jalan dan UI
+menandainya sebagai gagal alih-alih menampilkan error total.
+
+**Glints butuh TLS impersonation.** Cloudflare di depan Glints menolak request dengan
+JA3/JA4 di luar browser (curl dan `fetch` bawaan Node dapat `403` +
+`cf-mitigated: challenge`, bahkan dengan cookie challenge yang valid — sidik jari
+TLS-nya yang dinilai). Karena itu Glints dipanggil lewat [`impit`](https://www.npmjs.com/package/impit)
+(`new Impit({ browser: "chrome" })`), yang punya binary native per platform. Binary itu
+tidak boleh dibundel webpack/Turbopack, jadi `next.config.ts` mendaftarkannya di
+`serverExternalPackages: ["impit"]`.
+
+Konsekuensi dari pembatasan itu: halaman 2 pencarian Glints diblokir (`403`), dan
+`offset` diabaikan, jadi **satu query Glints maksimal 50 hasil**. Deskripsi juga tidak
+ada di respons pencarian (fieldnya `null`), sehingga tiap lowongan yang lolos filter
+24 jam perlu satu request ke halaman detailnya. Itu dilakukan paralel dengan batas 6
+koneksi, dan kegagalan satu halaman hanya membuat lowongan itu tetap berlabel "teks
+ringkas" — bukan menggagalkan pencarian.
+
+Dedupe menggabungkan nama perusahaan yang beda penulisan ("PT Appsku" vs "Appsku")
+dan judul yang beda kapitalisasi. Saat ada duplikat lintas sumber, entri dengan teks
+paling lengkap yang menang; kalau dua-duanya masih ringkas, Glints dipilih karena
+deskripsinya baru diambil setelah dedupe. Karena JobStreet hanya memberi ringkasan,
+`matchJob` juga memberi sinyal tersendiri untuk skill yang muncul di **judul** — judul
+selalu ada, walau badan lowongannya kosong.
 
 ## CV upload
 

@@ -1,29 +1,43 @@
 import type { NextRequest } from "next/server";
 import { matchJob } from "@/lib/match";
 import { deriveProfile, type SearchProfile } from "@/lib/profile";
-import { searchAllSources, type JobListing } from "@/lib/jobs";
+import {
+  enrichGlintsDescriptions,
+  searchAllSources,
+  type JobListing,
+} from "@/lib/jobs";
+import {
+  TARGET_WINDOW_HOURS,
+  postedTimestamp,
+  relativeLabel,
+  selectByFreshness,
+} from "@/lib/freshness";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const MAX_QUERIES = 3;
-const PER_QUERY = 20;
+const MAX_QUERIES = 5;
+const GLINTS_LIMIT = 50;
+const JOBSTREET_PAGE_SIZE = 50;
 
 export type ScoredJob = JobListing & {
   match: ReturnType<typeof matchJob>;
+  locationMatch: boolean;
 };
 
 export async function POST(req: NextRequest) {
   let cv = "";
   let keyword = "";
-  let location = "";
+  let locationInput = "";
+  let locationStrict = false;
 
   try {
     const body = await req.json();
     cv = String(body?.cv ?? "").trim();
     keyword = String(body?.keyword ?? "").trim();
-    location = String(body?.location ?? "").trim();
+    locationInput = String(body?.location ?? "").trim();
+    locationStrict = Boolean(body?.locationStrict);
   } catch {
     return Response.json({ error: "Request body tidak valid." }, { status: 400 });
   }
@@ -60,18 +74,47 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { jobs, sources } = await searchAllSources(limited, PER_QUERY, req.signal);
+  const location = locationInput || profile?.location || "";
+  const strictLocation = locationStrict && location ? location : undefined;
+
+  const searchOptions = {
+    glintsLimit: GLINTS_LIMIT,
+    jobstreetPageSize: JOBSTREET_PAGE_SIZE,
+    strictLocation,
+    signal: req.signal,
+  };
+
+  const now = Date.now();
+  const result = await searchAllSources(limited, searchOptions);
+  const fresh = selectByFreshness(result.jobs, now);
+
+  // Teks lengkap Glints hanya ada di halaman detail; diambil setelah umur
+  // disaring supaya jumlah request sesuai hasil yang benar-benar dipakai.
+  const freshJobs = await enrichGlintsDescriptions(fresh.jobs, req.signal);
+  const { sources } = result;
 
   const skills = profile
     ? { core: profile.core, other: profile.other }
     : { core: [] as string[], other: [] as string[] };
 
-  const scored: ScoredJob[] = jobs
+  const needle = location.trim().toLowerCase();
+  const preferLocation = needle.length > 0 && !strictLocation;
+
+  const scored: ScoredJob[] = freshJobs
     .map((job) => ({
       ...job,
-      match: matchJob(`${job.title}\n${job.description}`, skills),
+      postedLabel: relativeLabel(job.postedAt, now) ?? job.postedLabel,
+      match: matchJob(job.title, job.description, skills),
+      locationMatch: preferLocation ? job.location.toLowerCase().includes(needle) : false,
     }))
-    .sort((a, b) => b.match.score - a.match.score || b.match.matchedCore - a.match.matchedCore);
+    .sort(
+      (a, b) =>
+        b.match.score - a.match.score ||
+        Number(b.locationMatch) - Number(a.locationMatch) ||
+        b.match.titleMatches - a.match.titleMatches ||
+        b.match.matchedCore - a.match.matchedCore ||
+        postedTimestamp(b.postedAt) - postedTimestamp(a.postedAt),
+    );
 
   const allSourcesFailed = sources.length > 0 && sources.every((s) => !s.ok);
 
@@ -80,8 +123,16 @@ export async function POST(req: NextRequest) {
     profileError: profileError || null,
     queries: limited,
     location,
+    locationStrict: Boolean(strictLocation),
     sources,
     jobs: scored,
+    totalJobs: result.jobs.length,
+    freshness: {
+      targetHours: TARGET_WINDOW_HOURS,
+      windowHours: fresh.windowHours,
+      label: fresh.label,
+      targetCount: fresh.targetCount,
+    },
     allSourcesFailed,
   });
 }
